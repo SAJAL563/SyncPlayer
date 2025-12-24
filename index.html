@@ -1,0 +1,806 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Symphony Sync Player</title>
+    <!-- Fonts & Icons -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@24,400,0,0"
+        rel="stylesheet">
+    <!-- HLS.js -->
+    <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
+
+    <style>
+        :root {
+            /* Palette */
+            --bg-deep: #05030a;
+            --bg-surface: #0f0819;
+            --purple-glow: #7b2cbf;
+            --purple-accent: #9d4edd;
+            --text-primary: #ffffff;
+            --text-secondary: #cbb2fe;
+            --glass-bg: rgba(20, 10, 35, 0.4);
+            --glass-border: rgba(157, 78, 221, 0.15);
+            --glass-blur: 16px;
+            --danger: #ff4b4b;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            user-select: none;
+            -webkit-tap-highlight-color: transparent;
+        }
+
+        body {
+            font-family: 'Outfit', sans-serif;
+            background-color: var(--bg-deep);
+            color: var(--text-primary);
+            height: 100vh;
+            width: 100vw;
+            overflow: hidden;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        /* Ambient Background */
+        .ambient-glow {
+            position: absolute;
+            width: 120vw;
+            height: 120vh;
+            left: 50%;
+            top: 50%;
+            transform: translate(-50%, -50%);
+            background: radial-gradient(circle at 50% 50%, rgba(123, 44, 191, 0.15), transparent 60%);
+            z-index: 0;
+            animation: pulse-glow 10s ease-in-out infinite alternate;
+        }
+
+        @keyframes pulse-glow {
+            0% {
+                opacity: 0.5;
+                transform: translate(-50%, -50%) scale(1);
+            }
+
+            100% {
+                opacity: 0.8;
+                transform: translate(-50%, -50%) scale(1.1);
+            }
+        }
+
+        /* App Container */
+        .app-container {
+            position: relative;
+            width: 100%;
+            height: 100%;
+            z-index: 1;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            background-color: var(--bg-deep);
+            /* Ensure bg color persists in fullscreen */
+            overflow: hidden;
+            /* Contain the glow */
+        }
+
+        /* Video Container */
+        .video-wrapper {
+            position: relative;
+            width: 100%;
+            height: 100%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: transparent;
+            /* Changed from #000 to let bg shine if video aspect weird */
+            z-index: 2;
+            /* Content above glow */
+        }
+
+        video {
+            max-width: 100%;
+            max-height: 100%;
+            width: 100%;
+            height: 100%;
+            object-fit: contain;
+        }
+
+        /* Hidden Audio */
+        audio {
+            display: none;
+        }
+
+        /* Glass Controls Layer */
+        .controls-layer {
+            position: absolute;
+            bottom: 32px;
+            left: 50%;
+            transform: translateX(-50%);
+            z-index: 20;
+            /* Ensure on top of video-wrapper (z-index: 2) */
+            width: 90%;
+            max-width: 800px;
+            background: var(--glass-bg);
+            backdrop-filter: blur(var(--glass-blur));
+            -webkit-backdrop-filter: blur(var(--glass-blur));
+            border: 1px solid var(--glass-border);
+            border-radius: 24px;
+            padding: 16px 24px;
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+            opacity: 0;
+            transition: opacity 0.3s ease, transform 0.3s ease;
+            pointer-events: none;
+            /* Pass through when hidden */
+        }
+
+        .controls-layer:hover,
+        .controls-layer.active {
+            opacity: 1;
+            pointer-events: all;
+            transform: translateX(-50%) translateY(0);
+        }
+
+        /* Progress Bar */
+        .progress-container {
+            width: 100%;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .time-display {
+            font-size: 13px;
+            font-weight: 500;
+            color: var(--text-secondary);
+            font-variant-numeric: tabular-nums;
+            min-width: 80px;
+            text-align: center;
+        }
+
+        input[type="range"] {
+            -webkit-appearance: none;
+            appearance: none;
+            width: 100%;
+            height: 4px;
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 2px;
+            outline: none;
+            cursor: pointer;
+            position: relative;
+        }
+
+        input[type="range"]::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            background: var(--purple-accent);
+            box-shadow: 0 0 10px var(--purple-accent);
+            transition: transform 0.1s;
+        }
+
+        input[type="range"]::-webkit-slider-thumb:hover {
+            transform: scale(1.3);
+        }
+
+        /* Buttons Row */
+        .controls-row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        .btn-group {
+            display: flex;
+            align-items: center;
+            gap: 16px;
+        }
+
+        .icon-btn {
+            background: none;
+            border: none;
+            color: var(--text-primary);
+            cursor: pointer;
+            padding: 8px;
+            border-radius: 50%;
+            transition: background 0.2s, color 0.2s;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .icon-btn:hover {
+            background: rgba(255, 255, 255, 0.1);
+            color: var(--purple-accent);
+        }
+
+        .icon-btn .material-symbols-outlined {
+            font-size: 24px;
+        }
+
+        .icon-btn.active {
+            color: var(--purple-accent);
+        }
+
+        .force-sync-btn {
+            font-size: 12px;
+            font-weight: 600;
+            background: rgba(157, 78, 221, 0.2);
+            color: var(--purple-accent);
+            border: 1px solid var(--glass-border);
+            padding: 6px 12px;
+            border-radius: 12px;
+            letter-spacing: 0.5px;
+            text-transform: uppercase;
+            transition: all 0.2s;
+        }
+
+        .force-sync-btn:hover {
+            background: var(--purple-accent);
+            color: white;
+            box-shadow: 0 0 12px var(--purple-glow);
+        }
+
+        .btn-loading {
+            animation: spin 1s linear infinite;
+        }
+
+        @keyframes spin {
+            100% {
+                transform: rotate(360deg);
+            }
+        }
+
+        /* FAB */
+        .fab {
+            position: absolute;
+            top: 24px;
+            right: 24px;
+            width: 48px;
+            height: 48px;
+            border-radius: 16px;
+            background: var(--glass-bg);
+            backdrop-filter: blur(var(--glass-blur));
+            -webkit-backdrop-filter: blur(var(--glass-blur));
+            border: 1px solid var(--glass-border);
+            color: white;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+            transition: all 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+            z-index: 10;
+        }
+
+        .fab:hover {
+            transform: scale(1.05) rotate(90deg);
+            background: var(--purple-accent);
+            border-color: var(--purple-accent);
+        }
+
+        /* Modal */
+        .modal-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.6);
+            backdrop-filter: blur(8px);
+            z-index: 100;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            opacity: 0;
+            pointer-events: none;
+            transition: opacity 0.3s ease;
+        }
+
+        .modal-overlay.open {
+            opacity: 1;
+            pointer-events: all;
+        }
+
+        .modal-content {
+            background: linear-gradient(135deg, rgba(20, 10, 35, 0.9), rgba(10, 5, 20, 0.95));
+            border: 1px solid var(--glass-border);
+            width: 90%;
+            max-width: 400px;
+            border-radius: 24px;
+            padding: 32px;
+            box-shadow: 0 20px 50px rgba(0, 0, 0, 0.5);
+            transform: scale(0.95);
+            transition: transform 0.3s ease;
+        }
+
+        .modal-overlay.open .modal-content {
+            transform: scale(1);
+        }
+
+        .modal-title {
+            font-size: 20px;
+            font-weight: 600;
+            margin-bottom: 24px;
+            color: white;
+            text-align: center;
+            letter-spacing: -0.5px;
+        }
+
+        .input-group {
+            margin-bottom: 20px;
+        }
+
+        .input-group label {
+            display: block;
+            font-size: 12px;
+            color: var(--text-secondary);
+            margin-bottom: 8px;
+            margin-left: 4px;
+        }
+
+        .input-group input {
+            width: 100%;
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            color: white;
+            padding: 12px 16px;
+            border-radius: 12px;
+            font-family: inherit;
+            font-size: 14px;
+            outline: none;
+            transition: border-color 0.2s;
+        }
+
+        .input-group input:focus {
+            border-color: var(--purple-accent);
+            background: rgba(255, 255, 255, 0.08);
+        }
+
+        .modal-actions {
+            display: flex;
+            gap: 12px;
+            margin-top: 32px;
+        }
+
+        .btn {
+            flex: 1;
+            padding: 12px;
+            border-radius: 12px;
+            border: none;
+            font-family: inherit;
+            font-weight: 600;
+            cursor: pointer;
+            transition: filter 0.2s;
+        }
+
+        .btn-cancel {
+            background: transparent;
+            color: var(--text-secondary);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        .btn-confirm {
+            background: var(--purple-accent);
+            color: white;
+            box-shadow: 0 4px 15px rgba(157, 78, 221, 0.4);
+        }
+
+        .btn:hover {
+            filter: brightness(1.1);
+        }
+
+        /* Status Toast */
+        .toast {
+            position: absolute;
+            top: 24px;
+            left: 50%;
+            transform: translateX(-50%) translateY(-20px);
+            background: rgba(123, 44, 191, 0.9);
+            color: white;
+            padding: 8px 16px;
+            border-radius: 20px;
+            font-size: 13px;
+            font-weight: 500;
+            opacity: 0;
+            transition: all 0.3s;
+            pointer-events: none;
+            z-index: 50;
+        }
+
+        .toast.visible {
+            opacity: 1;
+            transform: translateX(-50%) translateY(0);
+        }
+    </style>
+</head>
+
+<body>
+
+    <div class="app-container" id="app_container">
+
+        <div class="ambient-glow"></div>
+        <div id="toast" class="toast">Sync Adjusted</div>
+
+        <!-- FAB -->
+        <button class="fab" id="fab" title="Configure Sources">
+            <span class="material-symbols-outlined">add</span>
+        </button>
+
+        <!-- Video Area -->
+        <div class="video-wrapper">
+            <video id="main_video" playsinline></video>
+        </div>
+
+        <!-- Hidden Audio -->
+        <audio id="main_audio"></audio>
+
+        <!-- Controls -->
+        <div class="controls-layer">
+            <!-- Progress -->
+            <div class="progress-container">
+                <span class="time-display" id="curr_time">0:00</span>
+                <input type="range" id="seek_bar" value="0" min="0" max="100" step="0.1">
+                <span class="time-display" id="total_time">0:00</span>
+            </div>
+
+            <!-- Buttons -->
+            <div class="controls-row">
+                <div class="btn-group">
+                    <button class="icon-btn" id="play_btn" title="Play/Pause">
+                        <span class="material-symbols-outlined">play_arrow</span>
+                    </button>
+
+                    <button class="icon-btn" id="mute_video_btn" title="Mute Video Source">
+                        <span class="material-symbols-outlined">videocam</span> <!-- videocam_off -->
+                    </button>
+
+                    <button class="icon-btn" id="mute_audio_btn" title="Mute Audio Source">
+                        <span class="material-symbols-outlined">volume_up</span> <!-- volume_off -->
+                    </button>
+
+                    <button class="force-sync-btn" id="sync_btn" title="Force Audio Sync">
+                        Force Sync
+                    </button>
+                </div>
+
+                <div class="btn-group">
+                    <button class="icon-btn" id="fullscreen_btn" title="Fullscreen">
+                        <span class="material-symbols-outlined">fullscreen</span>
+                    </button>
+                </div>
+            </div>
+        </div>
+
+    </div>
+
+    <!-- Modal -->
+    <div class="modal-overlay" id="modal_overlay">
+        <div class="modal-content">
+            <div class="modal-title">Media Sources</div>
+
+            <div class="input-group">
+                <label>VIDEO SOURCE (URL)</label>
+                <input type="text" id="video_url_input" placeholder="https://example.com/video.m3u8">
+            </div>
+
+            <div class="input-group">
+                <label>AUDIO SOURCE (URL)</label>
+                <input type="text" id="audio_url_input" placeholder="https://example.com/audio.m3u8">
+            </div>
+
+            <div class="modal-actions">
+                <button class="btn btn-cancel" id="cancel_btn">Cancel</button>
+                <button class="btn btn-confirm" id="load_btn">Load Media</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // --- State ---
+        const videoEl = document.getElementById('main_video');
+        const audioEl = document.getElementById('main_audio');
+        const playBtn = document.getElementById('play_btn');
+        const playIcon = playBtn.querySelector('span');
+        const seekBar = document.getElementById('seek_bar');
+        const currTimeEl = document.getElementById('curr_time');
+        const totalTimeEl = document.getElementById('total_time');
+
+        const muteVideoBtn = document.getElementById('mute_video_btn');
+        const muteVideoIcon = muteVideoBtn.querySelector('span');
+        const muteAudioBtn = document.getElementById('mute_audio_btn');
+        const muteAudioIcon = muteAudioBtn.querySelector('span');
+
+        const fullscreenBtn = document.getElementById('fullscreen_btn');
+        const syncBtn = document.getElementById('sync_btn');
+        const fab = document.getElementById('fab');
+        const modalOverlay = document.getElementById('modal_overlay');
+        const loadBtn = document.getElementById('load_btn');
+        const cancelBtn = document.getElementById('cancel_btn');
+        const videoInput = document.getElementById('video_url_input');
+        const audioInput = document.getElementById('audio_url_input');
+        const toast = document.getElementById('toast');
+        const appContainer = document.getElementById('app_container');
+        const controlsLayer = document.querySelector('.controls-layer');
+        let controlsTimeout;
+
+        function showControls() {
+            controlsLayer.classList.add('active');
+            appContainer.style.cursor = 'default';
+            clearTimeout(controlsTimeout);
+            controlsTimeout = setTimeout(() => {
+                if (!videoEl.paused) {
+                    controlsLayer.classList.remove('active');
+                    appContainer.style.cursor = 'none'; // Hide cursor for immersion
+                }
+            }, 3000);
+        }
+
+        appContainer.addEventListener('mousemove', showControls);
+        appContainer.addEventListener('touchstart', showControls, { passive: true });
+        appContainer.addEventListener('click', showControls);
+
+        let isDragging = false;
+        let userWasPlaying = false;
+        const SYNC_THRESHOLD_SEC = 0.3; // 300ms drift max
+
+        // HLS Instances
+        let hlsVideo = null;
+        let hlsAudio = null;
+
+        // --- Core Media Functions ---
+
+        function loadMedia(videoSrc, audioSrc) {
+            // Destroy existing HLS
+            if (hlsVideo) { hlsVideo.destroy(); hlsVideo = null; }
+            if (hlsAudio) { hlsAudio.destroy(); hlsAudio = null; }
+
+            // Load Video
+            if (Hls.isSupported()) {
+                hlsVideo = new Hls();
+                hlsVideo.loadSource(videoSrc);
+                hlsVideo.attachMedia(videoEl);
+            } else if (videoEl.canPlayType('application/vnd.apple.mpegurl')) {
+                videoEl.src = videoSrc;
+            } else {
+                console.error("HLS not supported for Video");
+                showToast("Video format not supported");
+            }
+
+            // Load Audio
+            if (Hls.isSupported() && audioSrc.includes('.m3u8')) {
+                hlsAudio = new Hls();
+                hlsAudio.loadSource(audioSrc);
+                hlsAudio.attachMedia(audioEl);
+            } else {
+                // Direct load for mp3/aac or native HLS
+                audioEl.src = audioSrc;
+            }
+
+            // Reset UX
+            playIcon.textContent = "play_arrow";
+            seekBar.value = 0;
+
+            // Auto-mute video by default if user desires, or keep on? 
+            // Usually we want audio from audio source only, so let's default video to Muted?
+            // User didn't specify default, but common for dual sync. 
+            // Let's leave them unmuted unless user clicks.
+
+            closeModal();
+            showToast("Media Loaded");
+        }
+
+        function togglePlay() {
+            if (videoEl.paused) {
+                const playPromise = videoEl.play();
+                if (playPromise !== undefined) {
+                    playPromise.then(() => {
+                        audioEl.play().catch(e => console.warn("Audio play blocked", e));
+                    }).catch(e => console.error("Video play error", e));
+                }
+            } else {
+                videoEl.pause();
+                audioEl.pause();
+            }
+        }
+
+        function updatePlayIcon() {
+            playIcon.textContent = videoEl.paused ? "play_arrow" : "pause";
+        }
+
+        function formatTime(seconds) {
+            if (!seconds || isNaN(seconds)) return "0:00";
+            const m = Math.floor(seconds / 60);
+            const s = Math.floor(seconds % 60);
+            return `${m}:${s.toString().padStart(2, '0')}`;
+        }
+
+        function showToast(msg) {
+            toast.textContent = msg;
+            toast.classList.add('visible');
+            setTimeout(() => toast.classList.remove('visible'), 2000);
+        }
+
+        // --- Sync Logic ---
+
+        // Audio should follow Video
+        // Video is Master
+
+        function syncCheck() {
+            if (videoEl.paused) return;
+
+            const diff = Math.abs(videoEl.currentTime - audioEl.currentTime);
+
+            // If drift is too large, snap audio to video
+            if (diff > SYNC_THRESHOLD_SEC) {
+                console.log(`Drift detected: ${diff.toFixed(3)}s. Syncing audio...`);
+                audioEl.currentTime = videoEl.currentTime;
+                // showToast(`Sync: ${diff.toFixed(2)}s`);
+            }
+
+            // If audio is paused but video is playing (e.g. stalled), try to resume audio
+            if (!videoEl.paused && audioEl.paused && audioEl.readyState >= 3) {
+                audioEl.play();
+            }
+        }
+
+        // Run sync check loop
+        setInterval(syncCheck, 1000);
+
+        // Event Listeners for Sync
+        videoEl.addEventListener('play', () => {
+            updatePlayIcon();
+            audioEl.currentTime = videoEl.currentTime;
+            audioEl.play().catch(() => { });
+        });
+
+        videoEl.addEventListener('pause', () => {
+            updatePlayIcon();
+            audioEl.pause();
+        });
+
+        videoEl.addEventListener('waiting', () => {
+            // If video buffers, pause audio
+            audioEl.pause();
+        });
+
+        videoEl.addEventListener('playing', () => {
+            // When video resumes, seek audio and resume
+            audioEl.currentTime = videoEl.currentTime;
+            audioEl.play();
+        });
+
+        videoEl.addEventListener('seeked', () => {
+            audioEl.currentTime = videoEl.currentTime;
+        });
+
+        videoEl.addEventListener('timeupdate', () => {
+            if (!isDragging) {
+                const percent = (videoEl.currentTime / videoEl.duration) * 100;
+                seekBar.value = percent || 0;
+                currTimeEl.textContent = formatTime(videoEl.currentTime);
+                totalTimeEl.textContent = formatTime(videoEl.duration);
+            }
+        });
+
+        // --- UI Interactions ---
+
+        playBtn.addEventListener('click', togglePlay);
+
+        muteVideoBtn.addEventListener('click', () => {
+            videoEl.muted = !videoEl.muted;
+            muteVideoIcon.textContent = videoEl.muted ? "videocam_off" : "videocam";
+        });
+
+        muteAudioBtn.addEventListener('click', () => {
+            audioEl.muted = !audioEl.muted;
+            muteAudioIcon.textContent = audioEl.muted ? "volume_off" : "volume_up";
+        });
+
+        syncBtn.addEventListener('click', () => {
+            audioEl.currentTime = videoEl.currentTime;
+            if (!videoEl.paused) audioEl.play();
+            showToast("Forced Sync");
+        });
+
+        fullscreenBtn.addEventListener('click', () => {
+            if (!document.fullscreenElement && !document.webkitFullscreenElement) {
+                if (appContainer.requestFullscreen) {
+                    appContainer.requestFullscreen();
+                } else if (appContainer.webkitRequestFullscreen) {
+                    appContainer.webkitRequestFullscreen();
+                }
+            } else {
+                if (document.exitFullscreen) {
+                    document.exitFullscreen();
+                } else if (document.webkitExitFullscreen) {
+                    document.webkitExitFullscreen();
+                }
+            }
+        });
+
+        // Seek Bar logic
+        seekBar.addEventListener('input', () => {
+            isDragging = true;
+            const time = (seekBar.value / 100) * videoEl.duration;
+            currTimeEl.textContent = formatTime(time);
+        });
+
+        seekBar.addEventListener('change', () => {
+            isDragging = false;
+            const time = (seekBar.value / 100) * videoEl.duration;
+            videoEl.currentTime = time;
+            audioEl.currentTime = time;
+        });
+
+        // Modal Logic
+        fab.addEventListener('click', openModal);
+        cancelBtn.addEventListener('click', closeModal);
+        loadBtn.addEventListener('click', () => {
+            const v = videoInput.value.trim();
+            const a = audioInput.value.trim();
+            if (v && a) {
+                loadMedia(v, a);
+            } else {
+                alert("Please enter both URLs");
+            }
+        });
+
+        function openModal() {
+            modalOverlay.classList.add('open');
+            // Allow pasting
+            videoInput.focus();
+        }
+
+        function closeModal() {
+            modalOverlay.classList.remove('open');
+        }
+
+        // Close modal on click outside
+        modalOverlay.addEventListener('click', (e) => {
+            if (e.target === modalOverlay) closeModal();
+        });
+
+        // Keyboard Shortcuts
+        document.addEventListener('keydown', (e) => {
+            // Ignore if in input
+            if (e.target.tagName === 'INPUT') return;
+
+            switch (e.key.toLowerCase()) {
+                case ' ':
+                case 'k':
+                    e.preventDefault();
+                    togglePlay();
+                    break;
+                case 'f':
+                    fullscreenBtn.click();
+                    break;
+                case 'm':
+                    muteAudioBtn.click();
+                    break;
+                case 'v':
+                    muteVideoBtn.click();
+                    break;
+            }
+        });
+
+        // Initialize with default empty state or example
+        // (Optional: Load a demo if you want, but user asked for "Add links")
+
+        // Initial controls fade in
+        showControls();
+
+    </script>
+</body>
+
+</html>
